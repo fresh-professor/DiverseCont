@@ -1,3 +1,4 @@
+=======
 ###########
 # Dataset #
 ###########
@@ -12,7 +13,7 @@ nb_classes: 10
 
 # Corruption Parameters
 corruption_percent: 0.2
-asymmetric_noise: False
+asymmetric_noise: False 
 
 x_c: 3
 x_h: 32
@@ -84,3 +85,4 @@ clip_grad:
 ########
 
 eval: True
+>>>>>>> 41bb3e4337c60c9d438a25fe595428809dcf59af

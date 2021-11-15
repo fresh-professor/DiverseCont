@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 *.swp
 *.pyc
 .ipynb_checkpoints
@@ -26,8 +25,6 @@ slurm_outputs
 
 # To ignore tensors
 *.tensors
-||||||| merged common ancestors
-=======
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -157,4 +154,30 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
->>>>>>> 2e7b9df3d229592f0d29e1d56b7159df1889f9d7
+*.swp
+*.pyc
+.ipynb_checkpoints
+*.tfidf
+.cenv
+.venv
+
+# Ignore data directory
+data
+
+# Ignore checkpoints
+checkpoints
+
+# Ignore run scripts
+# run_script
+
+# ignore slurm outputs
+slurm_outputs
+
+# To ignore images
+*.gif
+*.srt
+*.jpg*
+*.eps
+
+# To ignore tensors
+*.tensors
