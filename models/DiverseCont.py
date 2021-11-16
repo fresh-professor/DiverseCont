@@ -117,14 +117,13 @@ class DiverseCont(torch.nn.Module):
 
     def cluster_and_sample(self):
         """filter samples in delay buffer"""
-        self.expert.eval()
+        self.base.eval()
         with torch.no_grad():
-            import pudb; pudb.set_trace()  # XXX DEBUG
             xs = self.delay_buffer.get('imgs')
             ys = self.delay_buffer.get('cats')
             corrs = self.delay_buffer.get('corrupts')
 
-            features = self.expert(xs)
+            features = self.base(xs)
             features = F.normalize(features, dim=1)
 
             clean_p = list()
