@@ -24,6 +24,8 @@ device: 'cuda'
 ##############
 # SPR params #
 ##############
+
+model_name: 'diverse_cont'
 net: 'resnet_simclr18'
 
 purified_buffer_size: 500
@@ -32,7 +34,7 @@ purified_buffer_q_poa: 0.0 # power of allocation
 delayed_buffer_size: 500
 delayed_buffer_q_poa: 0.0 # power of allocation
 
-E_max: 5
+E_max: 1 # This is not noisy stream, so we can set this as 1 (original: 5)
 
 expert_train_epochs: 4000
 expert_batch_size: 500
