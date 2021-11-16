@@ -94,7 +94,7 @@ def main():
     data_scheduler = DataScheduler(config)
 
     writer = SummaryWriter(config['log_dir'])
-    model = MODEL[config['model_name']](config. writer)
+    model = MODEL[config['model_name']](config, writer)
 
     if args.resume_ckpt:
         model.load_state_dict(torch.load(args.resume_ckpt))
