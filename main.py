@@ -11,6 +11,7 @@ import numpy as np
 from tensorboardX import SummaryWriter
 from data import DataScheduler
 from models.SPR import SPR
+from models.DiverseCont import DiverseCont
 from train import train_model
 from utils import setup_logger, override_config
 
