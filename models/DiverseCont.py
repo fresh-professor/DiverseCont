@@ -119,9 +119,17 @@ class DiverseCont(torch.nn.Module):
         """filter samples in delay buffer"""
         self.base.eval()
         with torch.no_grad():
-            xs = self.delay_buffer.get('imgs')
-            ys = self.delay_buffer.get('cats')
-            corrs = self.delay_buffer.get('corrupts')
+            db_xs = self.delay_buffer.get('imgs')
+            db_ys = self.delay_buffer.get('cats')
+            db_corrs = self.delay_buffer.get('corrupts')
+
+            pb_xs = self.purified_buffer.get('imgs')
+            pb_ys = self.purified_buffer.get('cats')
+            pb_corrs = self.purified_buffer.get('corrupts')
+
+            xs = torch.cat((db_xs, db_xs), dim=0)
+            ys = torch.cat((db_ys, pb_ys), dim=0)
+            corrs = torch.cat((db_corrs, pb_corrs), dim=0)
 
             features = self.base(xs)
             features = F.normalize(features, dim=1)
@@ -130,7 +138,7 @@ class DiverseCont(torch.nn.Module):
             clean_idx = list()
             print("***********************************************")
             for u_y in torch.unique(ys).tolist():
-                y_mask = ys == u_y
+                y_mask = (ys == u_y)
                 corr = corrs[y_mask]
                 feature = features[y_mask]
 
@@ -138,7 +146,34 @@ class DiverseCont(torch.nn.Module):
                 _similarity_matrix = torch.relu(F.cosine_similarity(feature.unsqueeze(1), feature.unsqueeze(0), dim=-1))
 
                 # stochastic ensemble
-                _clean_ps = torch.zeros((self.E_max, len(feature)), dtype=torch.double)
+                # _clean_ps = torch.zeros((self.E_max, len(feature)), dtype=torch.double)
+                _clean_ps = torch.zeros(len(feature), dtype=torch.double)
+                # XXX modified version
+                # this is for stocastic process
+                # similarity_matrix = (_similarity_matrix > torch.rand_like(_similarity_matrix)).type(torch.float32)
+                similarity_matrix = _similarity_matrix.type(torch.float32)
+                similarity_matrix[similarity_matrix == 0] = 1e-5  # add small num for ensuring positive matrix
+
+                g = nx.from_numpy_matrix(similarity_matrix.cpu().numpy())
+                info = nx.eigenvector_centrality(g, max_iter=6000, weight='weight') # index: value
+                centrality = [info[i] for i in range(len(info))]
+
+                bmm_model = BetaMixture1D(max_iters=10)
+                # fit beta mixture model
+                c = np.asarray(centrality)
+                c, c_min, c_max = bmm_model.outlier_remove(c)
+                c = bmm_model.normalize(c, c_min, c_max)
+                bmm_model.fit(c)
+                bmm_model.create_lookup(1) # 0: noisy, 1: clean
+
+                # get posterior
+                c = np.asarray(centrality)
+                c = bmm_model.normalize(c, c_min, c_max)
+                p = bmm_model.look_lookup(c)
+                # this is for stocastic process
+                # _clean_ps[_i] = torch.from_numpy(p)
+                _clean_ps = torch.from_numpy(p)
+                '''
                 for _i in range(self.E_max):
                     similarity_matrix = (_similarity_matrix > torch.rand_like(_similarity_matrix)).type(torch.float32)
                     similarity_matrix[similarity_matrix == 0] = 1e-5  # add small num for ensuring positive matrix
@@ -160,8 +195,11 @@ class DiverseCont(torch.nn.Module):
                     c = bmm_model.normalize(c, c_min, c_max)
                     p = bmm_model.look_lookup(c)
                     _clean_ps[_i] = torch.from_numpy(p)
-
-                _clean_ps = torch.mean(_clean_ps, dim=0)
+                '''
+                #_clean_ps = torch.mean(_clean_ps, dim=0)
+                _clean_ps = _clean_ps
+                # This is not threshold.
+                # This code is used for "sampling with probability"
                 m = _clean_ps > torch.rand_like(_clean_ps)
 
                 clean_idx.extend(torch.nonzero(y_mask)[:, -1][m].tolist())
