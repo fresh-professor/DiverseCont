@@ -97,12 +97,17 @@ class DiverseCont(torch.nn.Module):
                 '''
                 self.train_self_base()
 
-                clean_idx, clean_p = self.cluster_and_sample()
-                self.update_purified_buffer(clean_idx, clean_p, step)
+                #clean_idx, clean_p = self.cluster_and_sample()
+                #self.update_purified_buffer(clean_idx, clean_p, step)
+                imgs, cats, corrupts, idxs, clean_p = self.cluster_and_sample()
+                self.update_purified_buffer_full_info(imgs, cats, corrupts, idxs, clean_p, step)
                 #self.expert_number += 1
 
     def update_purified_buffer(self, clean_idx, clean_p, step):
-        """update purified buffer with the filtered samples"""
+        """
+        update purified buffer with the filtered samples
+        based on index
+        """
         self.purified_buffer.update(
             imgs=self.delay_buffer.get('imgs')[clean_idx],
             cats=self.delay_buffer.get('cats')[clean_idx],
@@ -115,102 +120,180 @@ class DiverseCont(torch.nn.Module):
         self.writer.add_scalar(
             'buffer_corrupts', torch.sum(self.purified_buffer.get('corrupts')), step)
 
+    def update_purified_buffer_full_info(self, imgs, cats, corrupts, idxs, clean_p, step):
+        """
+        update purified buffer with the filtered samples
+        based on full_information
+        """
+        self.purified_buffer.update(
+            imgs=imgs,
+            cats=cats,
+            corrupts=corrupts,
+            idxs=idxs,
+            clean_ps=clean_p)
+
+        self.delay_buffer.reset()
+        print(colorful.bold_yellow(self.purified_buffer.state('corrupts')).styled_string)
+        self.writer.add_scalar(
+            'buffer_corrupts', torch.sum(self.purified_buffer.get('corrupts')), step)
     def cluster_and_sample(self):
         """filter samples in delay buffer"""
         self.base.eval()
         with torch.no_grad():
-            db_xs = self.delay_buffer.get('imgs')
-            db_ys = self.delay_buffer.get('cats')
-            db_corrs = self.delay_buffer.get('corrupts')
+            xs = self.delay_buffer.get('imgs')
+            ys = self.delay_buffer.get('cats')
+            corrs = self.delay_buffer.get('corrupts')
+            idxs = self.delay_buffer.get('idxs')
 
-            pb_xs = self.purified_buffer.get('imgs')
-            pb_ys = self.purified_buffer.get('cats')
-            pb_corrs = self.purified_buffer.get('corrupts')
+            if self.purified_buffer.is_full():
+                pb_xs = self.purified_buffer.get('imgs')
+                pb_ys = self.purified_buffer.get('cats')
+                pb_corrs = self.purified_buffer.get('corrupts')
+                pb_idxs = self.purified_buffer.get('idxs')
 
-            xs = torch.cat((db_xs, db_xs), dim=0)
-            ys = torch.cat((db_ys, pb_ys), dim=0)
-            corrs = torch.cat((db_corrs, pb_corrs), dim=0)
+                xs = torch.cat((xs, pb_xs), dim=0)
+                ys = torch.cat((ys, pb_ys), dim=0)
+                corrs = torch.cat((corrs, pb_corrs), dim=0)
+                idxs = torch.cat((idxs, pb_idxs), dim=0)
 
             features = self.base(xs)
             features = F.normalize(features, dim=1)
 
             clean_p = list()
             clean_idx = list()
+            imgs = torch.Tensor().cuda()
+            cats = torch.Tensor().cuda()
+            corrupts = torch.Tensor()
+            indexs = torch.Tensor()
             print("***********************************************")
-            for u_y in torch.unique(ys).tolist():
+            # Find the proper number of y class
+            pb_size = self.purified_buffer.rsvr_total_size
+
+            # sorting unique_ys based on its counts
+            unique_ys, unique_ys_count= torch.unique(ys, return_counts = True)
+            unique_ys = unique_ys[torch.sort(unique_ys_count)[1]]
+            unique_ys_count = torch.sort(unique_ys_count)[0]
+
+            # get the proper_size
+            proper_size = int(pb_size / unique_ys.shape[0])
+            print(f"Proper_size = {proper_size}")
+
+            #for u_y in torch.unique(ys).tolist():
+            for u_y, u_y_c in zip(unique_ys, unique_ys_count):
+                print(f"unique y / unique y count : {u_y} / {u_y_c}")
                 y_mask = (ys == u_y)
                 corr = corrs[y_mask]
-                feature = features[y_mask]
 
-                # ignore negative similairties
-                _similarity_matrix = torch.relu(F.cosine_similarity(feature.unsqueeze(1), feature.unsqueeze(0), dim=-1))
+                print("************************************************************")
+                if (proper_size >= u_y_c) :
+                    print(f"Iterative Sample Selection (just pass dataset (not enough data))")
+                    # pass all samples to purified buffer
+                    clean_idx.extend(torch.nonzero(y_mask)[:, -1].tolist())
+                    clean_p.extend(torch.zeros_like(torch.nonzero(y_mask)[:, -1]).tolist())
+                else :
+                    feature = features[y_mask]
+                    # ignore negative similairties
+                    _similarity_matrix = torch.relu(F.cosine_similarity(feature.unsqueeze(1), feature.unsqueeze(0), dim=-1))
 
                 # stochastic ensemble
                 # _clean_ps = torch.zeros((self.E_max, len(feature)), dtype=torch.double)
-                _clean_ps = torch.zeros(len(feature), dtype=torch.double)
+                #_clean_ps = torch.zeros(len(feature), dtype=torch.double)
                 # XXX modified version
                 # this is for stocastic process
                 # similarity_matrix = (_similarity_matrix > torch.rand_like(_similarity_matrix)).type(torch.float32)
-                similarity_matrix = _similarity_matrix.type(torch.float32)
-                similarity_matrix[similarity_matrix == 0] = 1e-5  # add small num for ensuring positive matrix
-
-                g = nx.from_numpy_matrix(similarity_matrix.cpu().numpy())
-                info = nx.eigenvector_centrality(g, max_iter=6000, weight='weight') # index: value
-                centrality = [info[i] for i in range(len(info))]
-
-                bmm_model = BetaMixture1D(max_iters=10)
-                # fit beta mixture model
-                c = np.asarray(centrality)
-                c, c_min, c_max = bmm_model.outlier_remove(c)
-                c = bmm_model.normalize(c, c_min, c_max)
-                bmm_model.fit(c)
-                bmm_model.create_lookup(1) # 0: noisy, 1: clean
-
-                # get posterior
-                c = np.asarray(centrality)
-                c = bmm_model.normalize(c, c_min, c_max)
-                p = bmm_model.look_lookup(c)
-                # this is for stocastic process
-                # _clean_ps[_i] = torch.from_numpy(p)
-                _clean_ps = torch.from_numpy(p)
-                '''
-                for _i in range(self.E_max):
-                    similarity_matrix = (_similarity_matrix > torch.rand_like(_similarity_matrix)).type(torch.float32)
+                    similarity_matrix = _similarity_matrix.type(torch.float32)
                     similarity_matrix[similarity_matrix == 0] = 1e-5  # add small num for ensuring positive matrix
 
-                    g = nx.from_numpy_matrix(similarity_matrix.cpu().numpy())
-                    info = nx.eigenvector_centrality(g, max_iter=6000, weight='weight') # index: value
-                    centrality = [info[i] for i in range(len(info))]
+                    print(f"Iterative Sample Selection (get {proper_size} from {u_y_c})")
+                    for i in tqdm.trange(proper_size, desc="iterative sampling", leave=False):
+                        g = nx.from_numpy_matrix(similarity_matrix.cpu().numpy())
+                        info = nx.eigenvector_centrality(g, max_iter=6000, weight='weight') # index: value
+                        centrality = [info[i] for i in range(len(info))]
 
-                    bmm_model = BetaMixture1D(max_iters=10)
-                    # fit beta mixture model
-                    c = np.asarray(centrality)
-                    c, c_min, c_max = bmm_model.outlier_remove(c)
-                    c = bmm_model.normalize(c, c_min, c_max)
-                    bmm_model.fit(c)
-                    bmm_model.create_lookup(1) # 0: noisy, 1: clean
+#                get posterior for clean sample (p(z=clean|centrality))
+#                bmm_model = BetaMixture1D(max_iters=10)
+#                # fit beta mixture model
+#                c = np.asarray(centrality)
+#                c, c_min, c_max = bmm_model.outlier_remove(c)
+#                c = bmm_model.normalize(c, c_min, c_max)
+#                bmm_model.fit(c)
+#                bmm_model.create_lookup(1) # 0: noisy, 1: clean
+#
+#                # get posterior
+#                c = np.asarray(centrality)
+#                c = bmm_model.normalize(c, c_min, c_max)
+#                p = bmm_model.look_lookup(c)
+#                # this is for stocastic process
+#                # _clean_ps[_i] = torch.from_numpy(p)
+#                _clean_ps = torch.from_numpy(p)
+                        '''
+                        for _i in range(self.E_max):
+                            similarity_matrix = (_similarity_matrix > torch.rand_like(_similarity_matrix)).type(torch.float32)
+                            similarity_matrix[similarity_matrix == 0] = 1e-5  # add small num for ensuring positive matrix
 
-                    # get posterior
-                    c = np.asarray(centrality)
-                    c = bmm_model.normalize(c, c_min, c_max)
-                    p = bmm_model.look_lookup(c)
-                    _clean_ps[_i] = torch.from_numpy(p)
-                '''
-                #_clean_ps = torch.mean(_clean_ps, dim=0)
-                _clean_ps = _clean_ps
-                # This is not threshold.
-                # This code is used for "sampling with probability"
-                m = _clean_ps > torch.rand_like(_clean_ps)
+                            g = nx.from_numpy_matrix(similarity_matrix.cpu().numpy())
+                            info = nx.eigenvector_centrality(g, max_iter=6000, weight='weight') # index: value
+                            centrality = [info[i] for i in range(len(info))]
 
-                clean_idx.extend(torch.nonzero(y_mask)[:, -1][m].tolist())
-                clean_p.extend(_clean_ps[m].tolist())
+                            bmm_model = BetaMixture1D(max_iters=10)
+                            # fit beta mixture model
+                            c = np.asarray(centrality)
+                            c, c_min, c_max = bmm_model.outlier_remove(c)
+                            c = bmm_model.normalize(c, c_min, c_max)
+                            bmm_model.fit(c)
+                            bmm_model.create_lookup(1) # 0: noisy, 1: clean
 
+                            # get posterior
+                            c = np.asarray(centrality)
+                            c = bmm_model.normalize(c, c_min, c_max)
+                            p = bmm_model.look_lookup(c)
+                            _clean_ps[_i] = torch.from_numpy(p)
+                        '''
+                        #_clean_ps = torch.mean(_clean_ps, dim=0)
+#                _clean_ps = _clean_ps
+                        # This is not threshold.
+                        # This code is used for "sampling with probability"
+                        #m = _clean_ps > torch.rand_like(_clean_ps)
+
+                        # get the most important node
+                        centrality = torch.Tensor(centrality)
+                        centrality = (centrality - centrality.min())/(centrality.max() - centrality.min())
+                        m = torch.argmax(centrality)
+                        #clean_idx.extend(torch.nonzero(y_mask)[:, -1][m].tolist())
+                        #clean_p.extend(centrality[m].tolist())
+                        clean_idx.append(torch.nonzero(y_mask)[:, -1][m].tolist())
+                        clean_p.append(centrality[m].tolist())
+
+                        # Set 0 to m's edge
+                        similarity_matrix[m, :] = 1e-5
+                        similarity_matrix[:, m] = 1e-5
+
+                print("************************************************************")
+                #clean_idx.extend(torch.nonzero(y_mask)[:, -1][m].tolist())
+                #clean_p.extend(_clean_ps[m].tolist())
+                #print(xs.shape)
+                #print(ys.shape)
+                #print(clean_idx)
+                #print(len(clean_idx))
+                #print(len(clean_p))
                 print("class: {}".format(u_y))
-                print("--- num of selected samples: {}".format(torch.sum(m).item()))
-                print("--- num of selected corrupt samples: {}".format(torch.sum(corr[m]).item()))
+                print("--- num of selected samples: {}".format(min(u_y_c, proper_size)))
+                #print("--- num of selected samples: {}".format(torch.sum(m).item()))
+                #print("--- num of selected corrupt samples: {}".format(torch.sum(corr[m]).item()))
             print("***********************************************")
-        return clean_idx, torch.Tensor(clean_p)
+            imgs = torch.cat((imgs, xs[clean_idx]), dim=0)
+            cats = torch.cat((cats, ys[clean_idx]), dim=0)
+            corrupts = torch.cat((corrupts, corrs[clean_idx]), dim=0)
+            indexs = torch.cat((indexs, idxs[clean_idx]), dim=0)
 
+            print(imgs.shape)
+            print(cats.shape)
+            print(corrupts.shape)
+            print(indexs.shape)
+            print(len(clean_p))
+        #return clean_idx, torch.Tensor(clean_p)
+        cats = cats.long()
+        return imgs, cats, corrupts, indexs, clean_p
 
     def train_self_base(self):
         """Self Replay. train base model with samples from delay and purified buffer"""

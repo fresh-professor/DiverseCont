@@ -1,3 +1,14 @@
+# Sangwoo Moon
+
+# tensor files
+*.tensor
+
+# checkpoints
+*.pth
+
+#############################
+
+
 *.swp
 *.pyc
 .ipynb_checkpoints
