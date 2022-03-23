@@ -31,8 +31,11 @@ net: 'mlp'
 h1_dim: 512
 h2_dim: 512
 
-purified_buffer_size: 500
-purified_buffer_q_poa: 0.0 # power of allocation
+# purified_buffer_size: 500
+# purified_buffer_q_poa: 0.0 # power of allocation
+
+diverse_buffer_size: 500
+diverse_buffer_q_poa: 0.0 # power of allocation
 
 delayed_buffer_size: 500
 delayed_buffer_q_poa: 0.0 # power of allocation
