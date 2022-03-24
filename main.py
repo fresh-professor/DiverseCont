@@ -10,8 +10,7 @@ import colorful
 import numpy as np
 from tensorboardX import SummaryWriter
 from data import DataScheduler
-from models.SPR import SPR
-from models.DiverseCont import DiverseCont
+from models import MODEL
 from train import train_model
 from utils import setup_logger, override_config
 
@@ -95,7 +94,7 @@ def main():
     data_scheduler = DataScheduler(config)
 
     writer = SummaryWriter(config['log_dir'])
-    model = SPR(config, writer)
+    model = MODEL[config['model_name']](config, writer)
 
     if args.resume_ckpt:
         model.load_state_dict(torch.load(args.resume_ckpt))

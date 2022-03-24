@@ -1,6 +1,7 @@
 ###########
 # Dataset #
 ###########
+
 data_root: './data'
 batch_size: 10
 num_workers: 16
@@ -11,12 +12,12 @@ batch_iter: 1
 nb_classes: 10
 
 # Corruption Parameters
-corruption_percent: 0.2
-asymmetric_noise: False 
+corruption_percent: 0.0
+asymmetric_noise: False
 
-x_c: 3
-x_h: 32
-x_w: 32
+x_c: 1
+x_h: 28
+x_w: 28
 y_c: 10
 
 device: 'cuda'
@@ -24,21 +25,30 @@ device: 'cuda'
 ##############
 # SPR params #
 ##############
-net: 'resnet_simclr18'
 
-purified_buffer_size: 500
-purified_buffer_q_poa: 0.0 # power of allocation
+model_name: 'diverse_cont'
+net: 'mlp'
+h1_dim: 512
+h2_dim: 512
+
+# purified_buffer_size: 500
+# purified_buffer_q_poa: 0.0 # power of allocation
+
+diverse_buffer_size: 500
+diverse_buffer_q_poa: 0.0 # power of allocation
 
 delayed_buffer_size: 500
 delayed_buffer_q_poa: 0.0 # power of allocation
 
 E_max: 5
 
+# expert_train_epochs: 4000
 expert_train_epochs: 4000
-expert_batch_size: 500
+expert_batch_size: 300
 
+# base_train_epochs: 3000
 base_train_epochs: 3000
-base_batch_size: 500
+base_batch_size: 300
 
 ft_epochs: 50
 ft_batch_size: 16
@@ -82,5 +92,4 @@ clip_grad:
 ########
 # Eval #
 ########
-
 eval: True
