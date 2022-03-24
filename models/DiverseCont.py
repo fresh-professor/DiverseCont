@@ -61,6 +61,32 @@ class DiverseCont(torch.nn.Module):
                 idxs = np.arange(len(self.delay_buffer))
                 self.update_diverse_buffer_full_info(idxs, step)
 
+    def sampling(self):
+        """TODO
+        how to sample?
+        how many sample?
+        """
+        self.base.eval()
+        with torch.no_grad():
+            xs = self.delay_buffer.get('imgs')
+            ys = self.delay_buffer.get('cats')
+            corrs = self.delay_buffer.get('corrupts')
+
+            features = self.base(xs)
+            # feature normalization by each row(image)
+            features = F.normalize(features, dim=1)
+            for u_y in torch.unique(ys).tolist():
+                y_mask = ys == u_y
+                corr = corrs[y_mask]
+                feature = features[y_mask]
+
+                _similarity_matrix = torch.relu(F.cosine_similarity(feature.unsqueeze(1), feature.unsqueeze(0), dim=-1))
+
+            print("class: {}".format(u_y))
+            print("--- num of selected samples: {}".format(torch.sum(m).item()))
+            print("--- num of selected corrupt samples: {}".format(torch.sum(corr[m]).item()))
+        print("***********************************************")
+
     def update_diverse_buffer_full_info(self, idx, step):
         self.diverse_buffer.update(
             imgs = self.delay_buffer.get('imgs')[idx],
